@@ -107,8 +107,8 @@ class Frame1(wx.Frame):
 
     def OnButtonWriteButton(self, event):
         if self.alive.isSet():
-            self.serial.write(b'$init '+self.textCtrlInitConfig.GetLabel().encode()+b'\r\n')
-            self.serial.write(b'$cycle '+self.textCtrlCycleConfig.GetLabel().encode()+b'\r\n')
+            self.serial.write(b'$init '+self.textCtrlInitConfig.GetValue().encode()+b'\r\n')
+            self.serial.write(b'$cycle '+self.textCtrlCycleConfig.GetValue().encode()+b'\r\n')
 
     def StartThread(self):
         """Start the receiver thread"""
@@ -129,7 +129,7 @@ class Frame1(wx.Frame):
         import serial
         if not self.alive.isSet():
             try:
-                self.serial = ser = serial.Serial('COM30', 115200, timeout=1)  # open serial port
+                self.serial = ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)  # open serial port
                 #print(ser.name)         # check which port was really used
                 self.SetTitle("Auto Switch on Serial Port: {}".format(self.serial.name))
                 self.StartThread()
@@ -163,10 +163,6 @@ class Frame1(wx.Frame):
                 if "Cycle config:" in msg:
                     self.textCtrlCycleConfig.Replace(0, -1, msg[14:])
                 
-                # if "New init config:" in msg:
-                    # self.textCtrlInitConfig.Replace(0,-1, msg[17:])
-                # if "New cycle config:" in msg:
-                    # self.textCtrlCycleConfig.Replace(0, -1, msg[18:])
                 
                 self.rxBuf = bytearray()
                     

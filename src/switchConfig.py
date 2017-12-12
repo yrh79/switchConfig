@@ -37,69 +37,54 @@ def create(parent):
 ] = [wx.NewId() for _init_ctrls in range(11)]
 
 class Frame1(wx.Frame):
-    def _init_coll_menuBar1_Menus(self, parent):
-        # generated method, don't edit
-
-        parent.Append(menu=self.MenuSettings, title=u'File')
-
-    def _init_utils(self):
-        # generated method, don't edit
-        self.menuBar1 = wx.MenuBar()
-
-        self.MenuSettings = wx.Menu(title=u'Settings...')
-
-        self._init_coll_menuBar1_Menus(self.menuBar1)
-
     def _init_ctrls(self, prnt):
         # generated method, don't edit
         wx.Frame.__init__(self, id=wxID_FRAME1, name='', parent=prnt,
               pos=wx.Point(418, 306), size=wx.Size(516, 328),
               style=wx.DEFAULT_FRAME_STYLE, title='Switch Configurator')
-        self._init_utils()
         self.SetClientSize(wx.Size(508, 301))
-        self.SetMenuBar(self.menuBar1)
 
         self.statusBar1 = wx.StatusBar(id=wxID_FRAME1STATUSBAR1,
               name='statusBar1', parent=self, style=0)
         self.SetStatusBar(self.statusBar1)
 
         self.panel1 = wx.Panel(id=wxID_FRAME1PANEL1, name='panel1', parent=self,
-              pos=wx.Point(0, 0), size=wx.Size(508, 262),
+              pos=wx.Point(0, 0), size=wx.Size(508, 281),
               style=wx.TAB_TRAVERSAL)
 
         self.staticBox1 = wx.StaticBox(id=wxID_FRAME1STATICBOX1,
               label=u'Configurations', name='staticBox1', parent=self.panel1,
-              pos=wx.Point(16, 16), size=wx.Size(480, 104), style=0)
+              pos=wx.Point(16, 8), size=wx.Size(480, 96), style=0)
 
         self.textCtrlOutput = wx.TextCtrl(id=wxID_FRAME1TEXTCTRLOUTPUT,
-              name='textCtrlOutput', parent=self.panel1, pos=wx.Point(16, 128),
-              size=wx.Size(480, 128),
+              name='textCtrlOutput', parent=self.panel1, pos=wx.Point(16, 120),
+              size=wx.Size(480, 152),
               style=wx.TE_READONLY | wx.TE_MULTILINE | wx.VSCROLL, value=u'')
 
         self.textCtrlInitConfig = wx.TextCtrl(id=wxID_FRAME1TEXTCTRLINITCONFIG,
               name=u'textCtrlInitConfig', parent=self.panel1, pos=wx.Point(152,
-              40), size=wx.Size(192, 27), style=0, value=u'{0, 11, 0, 0}')
+              24), size=wx.Size(192, 27), style=0, value=u'{0, 11, 0, 0}')
 
         self.textCtrlCycleConfig = wx.TextCtrl(id=wxID_FRAME1TEXTCTRLCYCLECONFIG,
               name=u'textCtrlCycleConfig', parent=self.panel1, pos=wx.Point(152,
-              80), size=wx.Size(192, 27), style=0, value=u'{1, 0, 0, 0}')
+              64), size=wx.Size(192, 27), style=0, value=u'{1, 0, 0, 0}')
 
         self.staticText1 = wx.StaticText(id=wxID_FRAME1STATICTEXT1,
               label=u'Init Config', name='staticText1', parent=self.panel1,
-              pos=wx.Point(56, 48), size=wx.Size(73, 17), style=0)
+              pos=wx.Point(56, 32), size=wx.Size(73, 17), style=0)
 
         self.staticText2 = wx.StaticText(id=wxID_FRAME1STATICTEXT2,
               label=u'Cycle Config', name='staticText2', parent=self.panel1,
-              pos=wx.Point(56, 88), size=wx.Size(85, 17), style=0)
+              pos=wx.Point(56, 72), size=wx.Size(85, 17), style=0)
 
         self.buttonRead = wx.Button(id=wxID_FRAME1BUTTONREAD, label=u'Read',
-              name=u'buttonRead', parent=self.panel1, pos=wx.Point(384, 40),
+              name=u'buttonRead', parent=self.panel1, pos=wx.Point(384, 24),
               size=wx.Size(85, 29), style=0)
         self.buttonRead.Bind(wx.EVT_BUTTON, self.OnButtonReadButton,
               id=wxID_FRAME1BUTTONREAD)
 
         self.buttonWrite = wx.Button(id=wxID_FRAME1BUTTONWRITE, label=u'Write',
-              name=u'buttonWrite', parent=self.panel1, pos=wx.Point(384, 80),
+              name=u'buttonWrite', parent=self.panel1, pos=wx.Point(384, 64),
               size=wx.Size(85, 29), style=0)
         self.buttonWrite.Bind(wx.EVT_BUTTON, self.OnButtonWriteButton,
               id=wxID_FRAME1BUTTONWRITE)
@@ -108,14 +93,14 @@ class Frame1(wx.Frame):
         self._init_ctrls(parent)
         
         ## buffer to hold the incoming chars for further matching
-        self.rxBuf = ''
+        self.rxBuf = bytearray() 
         
         ## threading
         self.thread = None
         self.serial = None
         self.Bind(EVT_SERIALRX, self.OnSerialRead)
         self.Bind(wx.EVT_CLOSE, self.OnClose)
-        self.alive = threading.Event()        
+        self.alive = threading.Event()
 
     def OnButtonReadButton(self, event):
         self.serial.write(b'$get\r\n')
@@ -148,8 +133,9 @@ class Frame1(wx.Frame):
                 #print(ser.name)         # check which port was really used
                 self.SetTitle("Auto Switch on Serial Port: {}".format(self.serial.name))
                 self.StartThread()
+                self.statusBar1.SetStatusText("Connected to an Auto Switch on Serial Port: {}".format(self.serial.name))
             except:
-                pass
+                self.statusBar1.SetStatusText("No active Auto Switch found!")
             
     def StopThread(self):
         """Stop the receiver thread, wait until it's finished."""
@@ -163,7 +149,28 @@ class Frame1(wx.Frame):
     
     def OnSerialRead(self, event):
         """Handle input from the serial port."""
-        self.WriteText(event.data.decode('UTF-8', 'replace'))
+        s = event.data
+        for b in s:
+            msg = self.rxBuf.decode()
+            self.rxBuf.append(b)
+            if b == '\n':
+                if "Auto Switch initialized..." in msg:
+                    self.serial.write(b'$get\r\n')
+                    
+                if "Init config:" in msg:
+                    self.textCtrlInitConfig.Replace(0,-1, msg[13:])
+                    
+                if "Cycle config:" in msg:
+                    self.textCtrlCycleConfig.Replace(0, -1, msg[14:])
+                
+                # if "New init config:" in msg:
+                    # self.textCtrlInitConfig.Replace(0,-1, msg[17:])
+                # if "New cycle config:" in msg:
+                    # self.textCtrlCycleConfig.Replace(0, -1, msg[18:])
+                
+                self.rxBuf = bytearray()
+                    
+        self.WriteText(s.decode('UTF-8', 'replace'))
         
     def ComPortThread(self):
         """\
@@ -174,9 +181,9 @@ class Frame1(wx.Frame):
             b = self.serial.read(self.serial.in_waiting or 1)
             if b:
                 event = SerialRxEvent(self.GetId(), b)
-                self.GetEventHandler().AddPendingEvent(event)        
+                self.GetEventHandler().AddPendingEvent(event)
 
-#-------------------------------------- COM port threading --------------        
+#-------------------------------------- COM port threading ends --------------        
                 
 if __name__ == '__main__':
     app = wx.PySimpleApp()

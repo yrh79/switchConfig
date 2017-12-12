@@ -1,14 +1,39 @@
 #Boa:Frame:Frame1
 
 import wx
+import threading
+
+# ----------------------------------------------------------------------
+# Create an own event type, so that GUI updates can be delegated
+# this is required as on some platforms only the main thread can
+# access the GUI without crashing. wxMutexGuiEnter/wxMutexGuiLeave
+# could be used too, but an event is more elegant.
+
+SERIALRX = wx.NewEventType()
+# bind to serial data receive events
+EVT_SERIALRX = wx.PyEventBinder(SERIALRX, 0)
+
+class SerialRxEvent(wx.PyCommandEvent):
+    eventType = SERIALRX
+
+    def __init__(self, windowID, data):
+        wx.PyCommandEvent.__init__(self, self.eventType, windowID)
+        self.data = data
+
+    def Clone(self):
+        self.__class__(self.GetId(), self.data)
+        
+# ----------------------------------------------------------------------
+
 
 def create(parent):
     return Frame1(parent)
 
 [wxID_FRAME1, wxID_FRAME1BUTTONREAD, wxID_FRAME1BUTTONWRITE, 
  wxID_FRAME1PANEL1, wxID_FRAME1STATICBOX1, wxID_FRAME1STATICTEXT1, 
- wxID_FRAME1STATICTEXT2, wxID_FRAME1STATUSBAR1, wxID_FRAME1TEXTCTRL1, 
+ wxID_FRAME1STATICTEXT2, wxID_FRAME1STATUSBAR1, 
  wxID_FRAME1TEXTCTRLCYCLECONFIG, wxID_FRAME1TEXTCTRLINITCONFIG, 
+ wxID_FRAME1TEXTCTRLOUTPUT, 
 ] = [wx.NewId() for _init_ctrls in range(11)]
 
 class Frame1(wx.Frame):
@@ -28,10 +53,10 @@ class Frame1(wx.Frame):
     def _init_ctrls(self, prnt):
         # generated method, don't edit
         wx.Frame.__init__(self, id=wxID_FRAME1, name='', parent=prnt,
-              pos=wx.Point(418, 306), size=wx.Size(509, 315),
+              pos=wx.Point(418, 306), size=wx.Size(516, 328),
               style=wx.DEFAULT_FRAME_STYLE, title='Switch Configurator')
         self._init_utils()
-        self.SetClientSize(wx.Size(509, 287))
+        self.SetClientSize(wx.Size(508, 301))
         self.SetMenuBar(self.menuBar1)
 
         self.statusBar1 = wx.StatusBar(id=wxID_FRAME1STATUSBAR1,
@@ -39,15 +64,16 @@ class Frame1(wx.Frame):
         self.SetStatusBar(self.statusBar1)
 
         self.panel1 = wx.Panel(id=wxID_FRAME1PANEL1, name='panel1', parent=self,
-              pos=wx.Point(0, 0), size=wx.Size(509, 265),
+              pos=wx.Point(0, 0), size=wx.Size(508, 262),
               style=wx.TAB_TRAVERSAL)
 
         self.staticBox1 = wx.StaticBox(id=wxID_FRAME1STATICBOX1,
               label=u'Configurations', name='staticBox1', parent=self.panel1,
               pos=wx.Point(16, 16), size=wx.Size(480, 104), style=0)
 
-        self.textCtrl1 = wx.TextCtrl(id=wxID_FRAME1TEXTCTRL1, name='textCtrl1',
-              parent=self.panel1, pos=wx.Point(16, 128), size=wx.Size(480, 128),
+        self.textCtrlOutput = wx.TextCtrl(id=wxID_FRAME1TEXTCTRLOUTPUT,
+              name='textCtrlOutput', parent=self.panel1, pos=wx.Point(16, 128),
+              size=wx.Size(480, 128),
               style=wx.TE_READONLY | wx.TE_MULTILINE | wx.VSCROLL, value=u'')
 
         self.textCtrlInitConfig = wx.TextCtrl(id=wxID_FRAME1TEXTCTRLINITCONFIG,
@@ -80,17 +106,82 @@ class Frame1(wx.Frame):
 
     def __init__(self, parent):
         self._init_ctrls(parent)
+        
+        ## buffer to hold the incoming chars for further matching
+        self.rxBuf = ''
+        
+        ## threading
+        self.thread = None
+        self.serial = None
+        self.Bind(EVT_SERIALRX, self.OnSerialRead)
+        self.Bind(wx.EVT_CLOSE, self.OnClose)
+        self.alive = threading.Event()        
 
     def OnButtonReadButton(self, event):
-        event.Skip()
+        self.serial.write(b'$get\r\n')
 
     def OnButtonWriteButton(self, event):
-        event.Skip()
+        if self.alive.isSet():
+            self.serial.write(b'$init '+self.textCtrlInitConfig.GetLabel().encode()+b'\r\n')
+            self.serial.write(b'$cycle '+self.textCtrlCycleConfig.GetLabel().encode()+b'\r\n')
 
+    def StartThread(self):
+        """Start the receiver thread"""
+        self.thread = threading.Thread(target=self.ComPortThread)
+        self.thread.setDaemon(1)
+        self.alive.set()
+        self.thread.start()
 
+    def OnClose(self, event):
+        """Called on application shutdown."""
+        self.StopThread()               # stop reader thread
+        if self.serial is not None:
+            self.serial.close()             # cleanup
+        self.Destroy()                  # close windows, exit app
+        
+#-------------------------------------- COM port threading --------------   
+    def startSerial(self):
+        import serial
+        if not self.alive.isSet():
+            try:
+                self.serial = ser = serial.Serial('COM30', 115200, timeout=1)  # open serial port
+                #print(ser.name)         # check which port was really used
+                self.SetTitle("Auto Switch on Serial Port: {}".format(self.serial.name))
+                self.StartThread()
+            except:
+                pass
+            
+    def StopThread(self):
+        """Stop the receiver thread, wait until it's finished."""
+        if self.thread is not None:
+            self.alive.clear()          # clear alive event for thread
+            self.thread.join()          # wait until thread has finished
+            self.thread = None
+            
+    def WriteText(self, text):
+        self.textCtrlOutput.AppendText(text)
+    
+    def OnSerialRead(self, event):
+        """Handle input from the serial port."""
+        self.WriteText(event.data.decode('UTF-8', 'replace'))
+        
+    def ComPortThread(self):
+        """\
+        Thread that handles the incoming traffic. Does the basic input
+        transformation (newlines) and generates an SerialRxEvent
+        """
+        while self.alive.isSet():
+            b = self.serial.read(self.serial.in_waiting or 1)
+            if b:
+                event = SerialRxEvent(self.GetId(), b)
+                self.GetEventHandler().AddPendingEvent(event)        
+
+#-------------------------------------- COM port threading --------------        
+                
 if __name__ == '__main__':
     app = wx.PySimpleApp()
     frame = create(None)
     frame.Show()
+    frame.startSerial()
 
     app.MainLoop()

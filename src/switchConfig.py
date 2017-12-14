@@ -44,7 +44,7 @@ class Frame1(wx.Frame):
     def _init_ctrls(self, prnt):
         # generated method, don't edit
         wx.Frame.__init__(self, id=wxID_FRAME1, name='', parent=prnt,
-              pos=wx.Point(418, 306), size=wx.Size(508, 363),
+              pos=wx.Point(418, 334), size=wx.Size(508, 363),
               style=wx.DEFAULT_FRAME_STYLE, title='Switch Configurator')
         self.SetClientSize(wx.Size(508, 335))
 
@@ -207,21 +207,23 @@ class Frame1(wx.Frame):
         """Handle input from the serial port."""
         s = event.data
         for b in s:
-            msg = self.rxBuf.decode()
             self.rxBuf.append(b)
             if b == '\n':
+                msg = self.rxBuf.decode()
                 if "Auto Switch initialized..." in msg:
                     self.serial.write(b'$get\r\n')
                     
                 if "Init config:" in msg:
-                    l = [x.strip(" ") for x in msg[13:].strip("{}\r").split(",")]
+                    l = [x.strip(" ") \
+                          for x in msg[13:].strip("{}\r\n").split(",")]
                     self.textCtrlInitConfig_day.Replace(0,-1, l[0])
                     self.textCtrlInitConfig_hour.Replace(0,-1, l[1])
                     self.textCtrlInitConfig_min.Replace(0,-1, l[2])
                     self.textCtrlInitConfig_sec.Replace(0,-1, l[3])
                     
                 if "Cycle config:" in msg:
-                    l = [x.strip(" ") for x in msg[14:].strip("{}\r").split(",")]
+                    l = [x.strip(" ") \
+                          for x in msg[14:].strip("{}\r\n").split(",")]
                     self.textCtrlCycleConfig_day.Replace(0, -1, l[0])
                     self.textCtrlCycleConfig_hour.Replace(0, -1, l[1])
                     self.textCtrlCycleConfig_min.Replace(0, -1, l[2])

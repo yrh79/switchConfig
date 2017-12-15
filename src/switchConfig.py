@@ -2,6 +2,8 @@
 
 import wx
 import threading
+import serial
+import serial.tools.list_ports as lp
 
 # ----------------------------------------------------------------------
 # Create an own event type, so that GUI updates can be delegated
@@ -22,7 +24,57 @@ class SerialRxEvent(wx.PyCommandEvent):
 
     def Clone(self):
         self.__class__(self.GetId(), self.data)
-        
+
+# ----------------------------------------------------------------------
+# Serial handling thread:
+# It would exit automatically if the port is not connected with an
+# Auto Switch device.
+
+class mySerialThread(threading.Thread):
+
+    def __init__(self, ownerFrame, portName):
+        threading.Thread.__init__(self)
+        self.ownerFrame = ownerFrame
+        self.portName = portName
+        self.serial = None
+        self.alive = threading.Event()
+        self.rxBuf = bytearray()
+        self.timer = wx.CallLater(10*1000, self.stop)
+        self.setDaemon(1)
+        self.confirmed = False
+
+    def stop(self):
+        self.alive.clear()
+
+    def run(self):
+        self.alive.set()
+        #print "trying {} ...".format(self.portName)
+        self.serial = serial.Serial(self.portName, 115200, timeout=1)  # open serial port
+        while self.alive.isSet():
+            s = None
+            try:
+                s = self.serial.read(self.serial.in_waiting or 1)
+            except:
+                return
+
+            if s:
+                if self.confirmed:
+                    self.ownerFrame.NotifySerialRx(s)
+                else:
+                    for b in s:
+                        self.rxBuf.append(b)
+
+                        if b == '\n':
+                            msg = self.rxBuf.decode()
+                            if "Auto Switch initialized..." in msg:
+                                self.timer.Stop()
+                                self.confirmed = True
+                                self.ownerFrame.NotifySerialSelected(self.portName, self.serial)
+                                del self.timer
+
+                            self.rxBuf = bytearray()
+
+
 # ----------------------------------------------------------------------
 
 
@@ -135,74 +187,58 @@ class Frame1(wx.Frame):
 
     def __init__(self, parent):
         self._init_ctrls(parent)
-        
-        ## buffer to hold the incoming chars for further matching
-        self.rxBuf = bytearray() 
-        
+
         ## threading
-        self.thread = None
+        self.threads = []
         self.serial = None
         self.Bind(EVT_SERIALRX, self.OnSerialRead)
         self.Bind(wx.EVT_CLOSE, self.OnClose)
-        self.alive = threading.Event()
+        self.rxBuf = bytearray()
+        self.connected = threading.Event()
 
     def OnButtonReadButton(self, event):
         self.serial.write(b'$get\r\n')
 
     def OnButtonWriteButton(self, event):
-        if self.alive.isSet():
+        if self.connected.isSet():
             i_d = self.textCtrlInitConfig_day.GetValue().encode()
             i_h = self.textCtrlInitConfig_hour.GetValue().encode()
             i_m = self.textCtrlInitConfig_min.GetValue().encode()
             i_s = self.textCtrlInitConfig_sec.GetValue().encode()
-            
+
             c_d = self.textCtrlCycleConfig_day.GetValue().encode()
             c_h = self.textCtrlCycleConfig_hour.GetValue().encode()
             c_m = self.textCtrlCycleConfig_min.GetValue().encode()
             c_s = self.textCtrlCycleConfig_sec.GetValue().encode()
-            
+
             i = b'$init {'+i_d+", "+i_h+", "+i_m+", "+i_s+b'}\r\n'
             c = b'$cycle {'+c_d+", "+c_h+", "+c_m+", "+c_s+b'}\r\n'
             self.serial.write(i)
             self.serial.write(c)
 
-    def StartThread(self):
-        """Start the receiver thread"""
-        self.thread = threading.Thread(target=self.ComPortThread)
-        self.thread.setDaemon(1)
-        self.alive.set()
-        self.thread.start()
 
     def OnClose(self, event):
         """Called on application shutdown."""
-        self.StopThread()               # stop reader thread
-        if self.serial is not None:
-            self.serial.close()             # cleanup
+        for t in self.threads:
+            if t.isAlive():
+                t.stop()
+                if t.serial is not None:
+                    t.serial.close()
+                t.join()
+
         self.Destroy()                  # close windows, exit app
-        
-#-------------------------------------- COM port threading --------------   
+
+#-------------------------------------- COM port handling --------------
+
     def startSerial(self):
-        import serial
-        if not self.alive.isSet():
-            try:
-                self.serial = ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)  # open serial port
-                #print(ser.name)         # check which port was really used
-                self.SetTitle("Auto Switch on Serial Port: {}".format(self.serial.name))
-                self.StartThread()
-                self.statusBar1.SetStatusText("Connected to an Auto Switch on Serial Port: {}".format(self.serial.name))
-            except:
-                self.statusBar1.SetStatusText("No active Auto Switch found!")
-            
-    def StopThread(self):
-        """Stop the receiver thread, wait until it's finished."""
-        if self.thread is not None:
-            self.alive.clear()          # clear alive event for thread
-            self.thread.join()          # wait until thread has finished
-            self.thread = None
-            
+        for port in lp.comports():
+            t = mySerialThread(self, port.device)
+            t.start()
+            self.threads.append(t)
+
     def WriteText(self, text):
         self.textCtrlOutput.AppendText(text)
-    
+
     def OnSerialRead(self, event):
         """Handle input from the serial port."""
         s = event.data
@@ -210,9 +246,7 @@ class Frame1(wx.Frame):
             self.rxBuf.append(b)
             if b == '\n':
                 msg = self.rxBuf.decode()
-                if "Auto Switch initialized..." in msg:
-                    self.serial.write(b'$get\r\n')
-                    
+
                 if "Init config:" in msg:
                     l = [x.strip(" ") \
                           for x in msg[13:].strip("{}\r\n").split(",")]
@@ -220,7 +254,7 @@ class Frame1(wx.Frame):
                     self.textCtrlInitConfig_hour.Replace(0,-1, l[1])
                     self.textCtrlInitConfig_min.Replace(0,-1, l[2])
                     self.textCtrlInitConfig_sec.Replace(0,-1, l[3])
-                    
+
                 if "Cycle config:" in msg:
                     l = [x.strip(" ") \
                           for x in msg[14:].strip("{}\r\n").split(",")]
@@ -228,24 +262,23 @@ class Frame1(wx.Frame):
                     self.textCtrlCycleConfig_hour.Replace(0, -1, l[1])
                     self.textCtrlCycleConfig_min.Replace(0, -1, l[2])
                     self.textCtrlCycleConfig_sec.Replace(0, -1, l[3])
-                
-                self.rxBuf = bytearray()
-                    
-        self.WriteText(s.decode('UTF-8', 'replace'))
-        
-    def ComPortThread(self):
-        """\
-        Thread that handles the incoming traffic. Does the basic input
-        transformation (newlines) and generates an SerialRxEvent
-        """
-        while self.alive.isSet():
-            b = self.serial.read(self.serial.in_waiting or 1)
-            if b:
-                event = SerialRxEvent(self.GetId(), b)
-                self.GetEventHandler().AddPendingEvent(event)
 
-#-------------------------------------- COM port threading ends --------------        
-                
+                self.rxBuf = bytearray()
+
+        self.WriteText(s.decode('UTF-8', 'replace'))
+
+    def NotifySerialSelected(self, portName, serialPort):
+        self.serial = serialPort
+        self.serial.write(b'$get\r\n')
+        self.statusBar1.SetStatusText("Connected to an Auto Switch on Serial Port: {}".format(portName))
+        self.connected.set()
+
+    def NotifySerialRx(self, data):
+        event = SerialRxEvent(self.GetId(), data)
+        self.GetEventHandler().AddPendingEvent(event)
+
+#-------------------------------------- COM port handling ends --------------
+
 if __name__ == '__main__':
     app = wx.PySimpleApp()
     frame = create(None)

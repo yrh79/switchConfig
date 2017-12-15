@@ -6,6 +6,6 @@ This is a helper project for the project https://github.com/yrh79/count_down_swi
 
 This is a GUI written in python. I'll make it a windows executable later on.
 
-Note: this is not a complete and workable program yet. If you wish to use it, please wait a little bit. I push it here just to make it easier to move around across my different development computers. :)
+The application would try to discover the correct comport to use automatically.
 
-It is functional but lack of the ability to automatically select the correct COM port to use. It'll be implemented later on. Please wait.
+Note: Ramdom crash is found, reason unknown yet. I'll try to figure out the reason and get it fix later on.

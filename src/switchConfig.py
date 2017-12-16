@@ -232,7 +232,11 @@ class Frame1(wx.Frame):
 
     def startSerial(self):
         for port in lp.comports():
-            t = mySerialThread(self, port.device)
+            t = None
+            try:
+               t = mySerialThread(self, port.device)
+            except AttributeError:
+               t = mySerialThread(self, port[0])
             t.start()
             self.threads.append(t)
 
@@ -280,7 +284,7 @@ class Frame1(wx.Frame):
 #-------------------------------------- COM port handling ends --------------
 
 if __name__ == '__main__':
-    app = wx.PySimpleApp()
+    app = wx.App()
     frame = create(None)
     frame.Show()
     frame.startSerial()

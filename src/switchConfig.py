@@ -32,7 +32,7 @@ class SerialRxEvent(wx.PyCommandEvent):
 
 class mySerialThread(threading.Thread):
 
-    def __init__(self, ownerFrame, portName):
+    def __init__(self, ownerFrame, portName, old_wx=False):
         threading.Thread.__init__(self)
         self.ownerFrame = ownerFrame
         self.portName = portName
@@ -42,6 +42,7 @@ class mySerialThread(threading.Thread):
         self.timer = wx.CallLater(10*1000, self.stop)
         self.setDaemon(1)
         self.confirmed = False
+        self.old_wx = old_wx
 
     def stop(self):
         self.alive.clear()
@@ -53,7 +54,10 @@ class mySerialThread(threading.Thread):
         while self.alive.isSet():
             s = None
             try:
-                s = self.serial.read(self.serial.in_waiting or 1)
+                if self.old_wx:
+                    s = self.serial.read(1)
+                else:
+                    s = self.serial.read(self.serial.in_waiting or 1)
             except:
                 return
 
@@ -230,13 +234,13 @@ class Frame1(wx.Frame):
 
 #-------------------------------------- COM port handling --------------
 
-    def startSerial(self):
+    def startSerial(self):   
         for port in lp.comports():
             t = None
             try:
                t = mySerialThread(self, port.device)
             except AttributeError:
-               t = mySerialThread(self, port[0])
+               t = mySerialThread(self, port[0], old_wx = True)
             t.start()
             self.threads.append(t)
 

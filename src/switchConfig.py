@@ -1,6 +1,7 @@
 #Boa:Frame:Frame1
 
 import wx
+import wx.lib.newevent
 import threading
 import serial
 import serial.tools.list_ports as lp
@@ -11,19 +12,7 @@ import serial.tools.list_ports as lp
 # access the GUI without crashing. wxMutexGuiEnter/wxMutexGuiLeave
 # could be used too, but an event is more elegant.
 
-SERIALRX = wx.NewEventType()
-# bind to serial data receive events
-EVT_SERIALRX = wx.PyEventBinder(SERIALRX, 0)
-
-class SerialRxEvent(wx.PyCommandEvent):
-    eventType = SERIALRX
-
-    def __init__(self, windowID, data):
-        wx.PyCommandEvent.__init__(self, self.eventType, windowID)
-        self.data = data
-
-    def Clone(self):
-        self.__class__(self.GetId(), self.data)
+(SerialRxEvent, EVT_SERIALRX) = wx.lib.newevent.NewEvent()
 
 # ----------------------------------------------------------------------
 # Serial handling thread:
@@ -50,7 +39,11 @@ class mySerialThread(threading.Thread):
     def run(self):
         self.alive.set()
         #print "trying {} ...".format(self.portName)
-        self.serial = serial.Serial(self.portName, 115200, timeout=1)  # open serial port
+        try:
+            self.serial = serial.Serial(self.portName, 115200, timeout=1)  # open serial port
+        except:
+            return
+
         while self.alive.isSet():
             s = None
             try:
@@ -249,7 +242,7 @@ class Frame1(wx.Frame):
 
     def OnSerialRead(self, event):
         """Handle input from the serial port."""
-        s = event.data
+        s = event.value
         for b in s:
             self.rxBuf.append(b)
             if b == '\n':
@@ -277,13 +270,13 @@ class Frame1(wx.Frame):
 
     def NotifySerialSelected(self, portName, serialPort):
         self.serial = serialPort
-        self.serial.write(b'$get\r\n')
         self.statusBar1.SetStatusText("Connected to an Auto Switch on Serial Port: {}".format(portName))
         self.connected.set()
+        self.serial.write(b'$get\r\n')
 
     def NotifySerialRx(self, data):
-        event = SerialRxEvent(self.GetId(), data)
-        self.GetEventHandler().AddPendingEvent(event)
+        event = SerialRxEvent(value=data)
+        wx.PostEvent(self, event)
 
 #-------------------------------------- COM port handling ends --------------
 
